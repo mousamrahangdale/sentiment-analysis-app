@@ -1,14 +1,16 @@
 """
-Sentiment classification using an open-source LLM served locally by Ollama,
-orchestrated through LangChain.
+Sentiment classification using an open-source LLM, orchestrated through
+LangChain. Supports two interchangeable providers, picked via
+LLM_PROVIDER in .env:
 
-Why Ollama: it runs fully open-source weights (Llama 3.x, Qwen2.5, Mistral, ...)
-on your own machine with zero API keys / cloud cost — a good fit for a
-"local model vs open source LLM" comparison in the same app.
+  - "groq"   -> hosted, free-tier API serving open-weight models
+               (Llama 3.x etc.) — no local GPU/RAM needed, works on
+               free hosting (Render, etc).
+  - "ollama" -> fully local, self-hosted, zero API key, needs
+               `ollama serve` running on the same machine.
 
-If you'd rather point this at a hosted OSS-model endpoint (Groq, Together,
-Fireworks, vLLM server, etc.) instead of local Ollama, only this file needs to
-change: swap ChatOllama for the equivalent LangChain chat model class.
+Both paths return the same JSON shape, so nothing else in the app
+(routers, schemas, frontend) needs to know which one is active.
 """
 
 import json
@@ -19,7 +21,6 @@ from functools import lru_cache
 
 from langchain_core.output_parsers import StrOutputParser
 from langchain_core.prompts import ChatPromptTemplate
-from langchain_ollama import ChatOllama
 
 from backend.config import Settings, get_settings
 
@@ -37,20 +38,46 @@ _HUMAN_PROMPT = "Text:\n\"\"\"{text}\"\"\""
 _JSON_BLOCK_RE = re.compile(r"\{.*\}", re.DOTALL)
 
 
-class LLMSentimentService:
-    def __init__(self, settings: Settings):
-        self.settings = settings
-        self.llm = ChatOllama(
+def _build_chat_model(settings: Settings):
+    if settings.llm_provider == "groq":
+        from langchain_groq import ChatGroq
+
+        if not settings.groq_api_key:
+            raise RuntimeError(
+                "LLM_PROVIDER=groq but GROQ_API_KEY is empty. Get a free key at "
+                "https://console.groq.com/keys and set it in .env (local) or as a "
+                "secret in your deployment platform."
+            )
+        return ChatGroq(
+            api_key=settings.groq_api_key,
+            model=settings.groq_model,
+            temperature=settings.llm_temperature,
+            timeout=settings.llm_timeout_seconds,
+        ), f"groq:{settings.groq_model}"
+
+    if settings.llm_provider == "ollama":
+        from langchain_ollama import ChatOllama
+
+        return ChatOllama(
             base_url=settings.ollama_base_url,
             model=settings.ollama_model,
             temperature=settings.llm_temperature,
             timeout=settings.llm_timeout_seconds,
-        )
+        ), f"ollama:{settings.ollama_model}"
+
+    raise RuntimeError(f"Unknown LLM_PROVIDER '{settings.llm_provider}' (use 'groq' or 'ollama').")
+
+
+class LLMSentimentService:
+    def __init__(self, settings: Settings):
+        self.settings = settings
+        self.llm, self.engine_name = _build_chat_model(settings)
+
         prompt = ChatPromptTemplate.from_messages(
             [("system", _SYSTEM_PROMPT), ("human", _HUMAN_PROMPT)]
         )
         # Chain: prompt -> chat model -> raw string. We parse JSON ourselves
-        # below with a regex fallback, since not every local model obeys
+        # below with a regex fallback, since not every model obeys
         # "JSON only" perfectly and we don't want a brittle parser to 500.
         self.chain = prompt | self.llm | StrOutputParser()
 
@@ -64,7 +91,7 @@ class LLMSentimentService:
 
         return {
             "source": "llm",
-            "engine": f"ollama:{self.settings.ollama_model}",
+            "engine": self.engine_name,
             "label": parsed["label"],
             "confidence": parsed["confidence"],
             "probabilities": None,

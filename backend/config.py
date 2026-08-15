@@ -30,11 +30,20 @@ class Settings(BaseSettings):
     max_sequence_length: int = 96  # must match training-time max_length
     id2label: dict[int, str] = {0: "Bad", 1: "Neutral", 2: "Good"}
 
-    # -- Open source LLM via LangChain + Ollama --
-    ollama_base_url: str = "http://localhost:11434"
-    ollama_model: str = "llama3.2"
+    # -- Open source LLM via LangChain --
+    # "groq"   -> hosted, free-tier API (works on any free host, no local RAM needed)
+    # "ollama" -> fully local, self-hosted (needs `ollama serve` running)
+    llm_provider: str = "groq"
     llm_temperature: float = 0.0
     llm_timeout_seconds: int = 30
+
+    # Groq (https://console.groq.com/keys - free tier)
+    groq_api_key: str = ""
+    groq_model: str = "llama-3.1-8b-instant"
+
+    # Ollama (local only)
+    ollama_base_url: str = "http://localhost:11434"
+    ollama_model: str = "llama3.2"
 
     # -- Request limits --
     max_text_length: int = 3000
