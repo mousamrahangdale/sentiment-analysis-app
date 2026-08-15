@@ -1,0 +1,19 @@
+# --- Web framework ---
+fastapi==0.115.6
+uvicorn[standard]==0.32.1
+pydantic==2.10.3
+pydantic-settings==2.6.1
+httpx==0.28.1
+python-multipart==0.0.19
+
+# --- Your fine-tuned DistilBERT model ---
+transformers==4.46.3
+torch==2.5.1
+
+# --- Open-source LLM via LangChain + Ollama ---
+langchain==0.3.9
+langchain-core==0.3.21
+langchain-ollama==0.2.1
+
+# --- Testing ---
+pytest==8.3.4

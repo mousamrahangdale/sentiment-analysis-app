@@ -1,0 +1,47 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Sentiment Checker</title>
+<link rel="stylesheet" href="style.css" />
+</head>
+<body>
+
+<div class="card">
+  <h1>Sentiment Checker</h1>
+  <p class="subtitle">Type a sentence or paragraph and check its sentiment.</p>
+
+  <div class="option-group">
+    <label class="option">
+      <input type="radio" name="source" value="local_model" checked />
+      My DistilBERT Model
+    </label>
+    <label class="option">
+      <input type="radio" name="source" value="llm" />
+      Open Source LLM
+    </label>
+  </div>
+
+  <textarea
+    id="textInput"
+    placeholder="Write something here..."
+    rows="6"
+    maxlength="3000"
+  ></textarea>
+
+  <button id="analyzeBtn">Check Sentiment</button>
+
+  <div id="result" class="result" hidden>
+    <p>Sentiment: <span id="resultLabel" class="label"></span></p>
+    <p>Confidence: <span id="resultConfidence"></span></p>
+    <p id="resultReason" class="reason"></p>
+    <p class="meta" id="resultMeta"></p>
+  </div>
+
+  <div id="error" class="error" hidden></div>
+</div>
+
+<script src="app.js"></script>
+</body>
+</html>

@@ -1,0 +1,35 @@
+# Local Docker usage:
+#
+#   docker compose up --build
+#     -> runs the app only, using LLM_PROVIDER=groq from your .env (recommended)
+#
+#   Using Ollama running on your HOST machine (not in Docker)?
+#     In .env set: OLLAMA_BASE_URL=http://host.docker.internal:11434
+#     (localhost won't work from inside the container - it points at the
+#     container itself, not your Windows/Mac host)
+#
+#   docker compose --profile local-llm up --build
+#     -> starts a local Ollama container too, for a fully offline stack.
+#        In .env set: OLLAMA_BASE_URL=http://ollama:11434
+#        (first run: docker compose exec ollama ollama pull llama3.2)
+
+services:
+  app:
+    build: .
+    ports:
+      - "8000:7860"
+    env_file:
+      - .env
+    environment:
+      - PORT=7860
+
+  ollama:
+    image: ollama/ollama:latest
+    profiles: ["local-llm"]
+    ports:
+      - "11434:11434"
+    volumes:
+      - ollama_data:/root/.ollama
+
+volumes:
+  ollama_data:

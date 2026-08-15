@@ -1,0 +1,16 @@
+__pycache__/
+*.pyc
+.venv/
+venv/
+.env
+*.log
+
+# model checkpoints are large binaries - keep out of git, copy manually per environment
+#saved_models/distilbert_sentiment/*
+!saved_models/distilbert_sentiment/.gitkeep
+!saved_models/distilbert_sentiment/README.md
+
+.pytest_cache/
+.idea/
+.vscode/*
+!.vscode/settings.json
