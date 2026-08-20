@@ -2,7 +2,7 @@
 
 A production-shaped sentiment analysis app that lets you compare **your own
 fine-tuned DistilBERT model** against an **open-source LLM (via LangChain +
-Ollama)** on the same text, side by side.
+cardiffnlp/twitter-roberta-base-sentiment-latest)** on the same text, side by side.
 
 ```
 ┌─────────────┐     POST /api/v1/sentiment/analyze     ┌───────────────────┐
@@ -11,7 +11,7 @@ Ollama)** on the same text, side by side.
 └─────────────┘                                          │  source=local_model│
                                                            │   -> your DistilBERT
                                                            │  source=llm         │
-                                                           │   -> LangChain+Ollama│
+                                                           │   -> LangChain+cardiffnlp│
                                                            └───────────────────┘
 ```
 
@@ -27,7 +27,7 @@ sentiment-analysis-project/
 │   ├── routers/sentiment.py # POST /api/v1/sentiment/analyze
 │   └── services/
 │       ├── distilbert_service.py   # loads YOUR saved checkpoint, predicts
-│       └── llm_service.py          # LangChain + ChatOllama, predicts
+│       └── llm_service.py          # LangChain + opensourcemodel, predicts
 ├── frontend/                # plain HTML/CSS/JS console UI
 ├── saved_models/distilbert_sentiment/   # <- put your checkpoint files here
 ├── tests/test_api.py
@@ -43,7 +43,7 @@ so preprocessing matches training exactly.
 ## 1. Prerequisites
 
 - Python 3.10+
-- [Ollama](https://ollama.com/download) installed, for the open-source LLM path
+- Hugging Face Token (api key)
 
 ## 2. Get the code into VS Code
 
