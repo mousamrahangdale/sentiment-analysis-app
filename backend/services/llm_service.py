@@ -1,132 +1,116 @@
 """
-Sentiment classification using an open-source LLM, orchestrated through
-LangChain. Supports two interchangeable providers, picked via
-LLM_PROVIDER in .env:
+Hybrid sentiment service:
+  1. cardiffnlp/twitter-roberta-base-sentiment-latest -> fast, reliable
+     label + confidence (dedicated classifier, no prompting needed).
+  2. A small chat model -> given the text AND the already-decided label,
+     writes one short sentence explaining why. This is a much easier task
+     than classification (justification, not judgment), so a small model
+     is fast and reliable here even though it wasn't for classification.
 
-  - "groq"   -> hosted, free-tier API serving open-weight models
-               (Llama 3.x etc.) — no local GPU/RAM needed, works on
-               free hosting (Render, etc).
-  - "ollama" -> fully local, self-hosted, zero API key, needs
-               `ollama serve` running on the same machine.
-
-Both paths return the same JSON shape, so nothing else in the app
-(routers, schemas, frontend) needs to know which one is active.
+If step 2 fails or times out, we still return the classification result
+with reason=None rather than failing the whole request — the reason is a
+nice-to-have, not the core signal.
 """
 
-import json
 import logging
-import re
 import time
 from functools import lru_cache
 
-from langchain_core.output_parsers import StrOutputParser
-from langchain_core.prompts import ChatPromptTemplate
+from huggingface_hub import InferenceClient
 
 from backend.config import Settings, get_settings
 
 logger = logging.getLogger("sentiment.llm")
 
-_SYSTEM_PROMPT = """You are a strict sentiment-classification engine.
-Classify the sentiment of the user's text into exactly one of: Bad, Neutral, Good.
+_LABEL_MAP = {
+    "negative": "Bad",
+    "neutral": "Neutral",
+    "positive": "Good",
+}
 
-Respond with ONLY a single JSON object, no prose before or after, in this exact shape:
-{{"label": "Bad" | "Neutral" | "Good", "confidence": <float between 0 and 1>, "reason": "<one short sentence>"}}
-"""
-
-_HUMAN_PROMPT = "Text:\n\"\"\"{text}\"\"\""
-
-_JSON_BLOCK_RE = re.compile(r"\{.*\}", re.DOTALL)
-
-
-def _build_chat_model(settings: Settings):
-    if settings.llm_provider == "groq":
-        from langchain_groq import ChatGroq
-
-        if not settings.groq_api_key:
-            raise RuntimeError(
-                "LLM_PROVIDER=groq but GROQ_API_KEY is empty. Get a free key at "
-                "https://console.groq.com/keys and set it in .env (local) or as a "
-                "secret in your deployment platform."
-            )
-        return ChatGroq(
-            api_key=settings.groq_api_key,
-            model=settings.groq_model,
-            temperature=settings.llm_temperature,
-            timeout=settings.llm_timeout_seconds,
-        ), f"groq:{settings.groq_model}"
-
-    if settings.llm_provider == "ollama":
-        from langchain_ollama import ChatOllama
-
-        return ChatOllama(
-            base_url=settings.ollama_base_url,
-            model=settings.ollama_model,
-            temperature=settings.llm_temperature,
-            timeout=settings.llm_timeout_seconds,
-        ), f"ollama:{settings.ollama_model}"
-
-    raise RuntimeError(f"Unknown LLM_PROVIDER '{settings.llm_provider}' (use 'groq' or 'ollama').")
+_REASON_SYSTEM_PROMPT = (
+    "You are given a piece of text and its already-determined sentiment label. "
+    "Write ONE short, natural sentence (max 20 words) explaining why the text "
+    "carries that sentiment. Do not mention confidence scores or restate the "
+    "label itself. Respond with only the sentence — no quotes, no prefix."
+)
 
 
 class LLMSentimentService:
     def __init__(self, settings: Settings):
-        self.settings = settings
-        self.llm, self.engine_name = _build_chat_model(settings)
+        if not settings.huggingfacehub_api_token:
+            raise ValueError(
+                "HUGGINGFACEHUB_API_TOKEN is not set. Get a free token at "
+                "https://huggingface.co/settings/tokens and put it in your .env file."
+            )
 
-        prompt = ChatPromptTemplate.from_messages(
-            [("system", _SYSTEM_PROMPT), ("human", _HUMAN_PROMPT)]
+        self.settings = settings
+
+        self.classifier = InferenceClient(
+            model=settings.hf_model_repo_id,
+            token=settings.huggingfacehub_api_token,
+            provider=settings.hf_provider,
+            timeout=settings.llm_timeout_seconds,
         )
-        # Chain: prompt -> chat model -> raw string. We parse JSON ourselves
-        # below with a regex fallback, since not every model obeys
-        # "JSON only" perfectly and we don't want a brittle parser to 500.
-        self.chain = prompt | self.llm | StrOutputParser()
+        self.reasoner = InferenceClient(
+            model=settings.hf_reason_model_repo_id,
+            token=settings.huggingfacehub_api_token,
+            provider=settings.hf_reason_provider,
+            timeout=settings.llm_timeout_seconds,
+        )
 
     def predict(self, text: str) -> dict:
         start = time.perf_counter()
 
-        raw = self.chain.invoke({"text": text})
-        parsed = self._parse_json(raw)
+        # -- Step 1: classify (fast, reliable) --
+        results = self.classifier.text_classification(text, top_k=None)
+        best = max(results, key=lambda r: r["score"])
+        label = _LABEL_MAP.get(best["label"].lower(), "Neutral")
+        probabilities = {
+            _LABEL_MAP.get(r["label"].lower(), r["label"]): round(r["score"], 4)
+            for r in results
+        }
+
+        # -- Step 2: explain (best-effort, never blocks the response) --
+        reason = self._generate_reason(text, label)
 
         latency_ms = (time.perf_counter() - start) * 1000
 
-        return {
+        result = {
             "source": "llm",
-            "engine": self.engine_name,
-            "label": parsed["label"],
-            "confidence": parsed["confidence"],
-            "probabilities": None,
-            "reason": parsed.get("reason"),
+            "engine": f"huggingface:{self.settings.hf_model_repo_id}",
+            "label": label,
+            "confidence": round(best["score"], 4),
+            "probabilities": probabilities,
+            "reason": reason,
             "latency_ms": round(latency_ms, 2),
             "text_length": len(text),
         }
 
-    @staticmethod
-    def _parse_json(raw: str) -> dict:
-        candidate = raw.strip()
+        print(f"[DEBUG] Final result dict being returned: {result}")
+        return result
+
+    def _generate_reason(self, text: str, label: str) -> str | None:
+        print(f"[DEBUG] Calling reasoner model={self.settings.hf_reason_model_repo_id} provider={self.settings.hf_reason_provider}")
         try:
-            data = json.loads(candidate)
-        except json.JSONDecodeError:
-            match = _JSON_BLOCK_RE.search(candidate)
-            if not match:
-                logger.warning("LLM did not return parseable JSON: %r", raw)
-                return {"label": "Neutral", "confidence": 0.0, "reason": "Could not parse model output."}
-            try:
-                data = json.loads(match.group(0))
-            except json.JSONDecodeError:
-                logger.warning("LLM JSON block still invalid: %r", raw)
-                return {"label": "Neutral", "confidence": 0.0, "reason": "Could not parse model output."}
-
-        label = str(data.get("label", "Neutral")).strip().title()
-        if label not in ("Bad", "Neutral", "Good"):
-            label = "Neutral"
-
-        try:
-            confidence = float(data.get("confidence", 0.5))
-        except (TypeError, ValueError):
-            confidence = 0.5
-        confidence = max(0.0, min(1.0, confidence))
-
-        return {"label": label, "confidence": confidence, "reason": data.get("reason")}
+            response = self.reasoner.chat_completion(
+                messages=[
+                    {"role": "system", "content": _REASON_SYSTEM_PROMPT},
+                    {
+                        "role": "user",
+                        "content": f'Text: "{text}"\nSentiment label: {label}',
+                    },
+                ],
+                max_tokens=self.settings.llm_max_new_tokens,
+                temperature=self.settings.llm_temperature,
+            )
+            reason = response.choices[0].message.content.strip()
+            print(f"[DEBUG] Reason generated successfully: {reason!r}")
+            return reason
+        except Exception as e:
+            print(f"[DEBUG] Reason generation FAILED: {type(e).__name__}: {e}")
+            logger.warning("Reason generation failed; returning label without reason.", exc_info=True)
+            return None
 
 
 @lru_cache

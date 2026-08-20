@@ -1,9 +1,5 @@
 """
 Centralised app configuration.
-
-All tunables live here and are overridable via environment variables / .env
-so the exact same code runs unchanged across local dev, CI, and (later)
-a Docker container.
 """
 
 from functools import lru_cache
@@ -27,23 +23,23 @@ class Settings(BaseSettings):
 
     # -- Local fine-tuned DistilBERT model --
     distilbert_model_path: str = str(BASE_DIR / "saved_models" / "distilbert_sentiment")
-    max_sequence_length: int = 96  # must match training-time max_length
+    max_sequence_length: int = 96
     id2label: dict[int, str] = {0: "Bad", 1: "Neutral", 2: "Good"}
 
-    # -- Open source LLM via LangChain --
-    # "groq"   -> hosted, free-tier API (works on any free host, no local RAM needed)
-    # "ollama" -> fully local, self-hosted (needs `ollama serve` running)
-    llm_provider: str = "groq"
-    llm_temperature: float = 0.0
-    llm_timeout_seconds: int = 30
+    # -- Hugging Face Inference Providers --
+    huggingfacehub_api_token: str = ""
 
-    # Groq (https://console.groq.com/keys - free tier)
-    groq_api_key: str = ""
-    groq_model: str = "llama-3.1-8b-instant"
+    # Dedicated classifier: fast, reliable label + confidence.
+    hf_model_repo_id: str = "cardiffnlp/twitter-roberta-base-sentiment-latest"
+    hf_provider: str = "hf-inference"
 
-    # Ollama (local only)
-    ollama_base_url: str = "http://localhost:11434"
-    ollama_model: str = "llama3.2"
+    # Small chat model used ONLY to explain an already-decided label —
+    # much easier task than classification, so a small/fast model is fine.
+    hf_reason_model_repo_id: str = "HuggingFaceTB/SmolLM3-3B"
+    hf_reason_provider: str = "hf-inference"
+    llm_temperature: float = 0.3
+    llm_max_new_tokens: int = 60  # short sentence only
+    llm_timeout_seconds: int = 15  # fail fast, reason is a nice-to-have
 
     # -- Request limits --
     max_text_length: int = 3000
@@ -51,5 +47,4 @@ class Settings(BaseSettings):
 
 @lru_cache
 def get_settings() -> Settings:
-    """Settings are cheap to build but env parsing happens once per process."""
     return Settings()

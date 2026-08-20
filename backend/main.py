@@ -35,6 +35,11 @@ async def lifespan(app: FastAPI):
             "route will return 503 until the checkpoint is in place).",
             exc,
         )
+    if not settings.huggingfacehub_api_token:
+        logger.warning(
+            "Startup warning: HUGGINGFACEHUB_API_TOKEN is not set (the "
+            "/api/v1/sentiment/analyze 'llm' route will return 502 until it is)."
+        )
     yield
 
 
@@ -66,18 +71,27 @@ def create_app() -> FastAPI:
         except ModelNotFoundError:
             distilbert_loaded = False
 
-        ollama_reachable = False
-        try:
-            async with httpx.AsyncClient(timeout=2.0) as client:
-                resp = await client.get(f"{settings.ollama_base_url}/api/tags")
-                ollama_reachable = resp.status_code == 200
-        except httpx.HTTPError:
-            ollama_reachable = False
+        # Live check: confirm the token actually authenticates against
+        # Hugging Face, not just that a non-empty string is configured.
+        # NOTE: HealthResponse's field is still named `ollama_reachable`
+        # (kept for schema/frontend backward-compat) but it now reflects HF
+        # token validity, not an Ollama daemon.
+        hf_reachable = False
+        if settings.huggingfacehub_api_token:
+            try:
+                async with httpx.AsyncClient(timeout=2.0) as client:
+                    resp = await client.get(
+                        "https://huggingface.co/api/whoami-v2",
+                        headers={"Authorization": f"Bearer {settings.huggingfacehub_api_token}"},
+                    )
+                    hf_reachable = resp.status_code == 200
+            except httpx.HTTPError:
+                hf_reachable = False
 
         return HealthResponse(
             status="ok",
             distilbert_loaded=distilbert_loaded,
-            ollama_reachable=ollama_reachable,
+            ollama_reachable=hf_reachable,
         )
 
     # Serve the simple frontend at "/" so the whole app is a single `uvicorn` process.

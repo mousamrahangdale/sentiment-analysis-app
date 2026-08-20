@@ -46,8 +46,10 @@ def analyze_sentiment(
             raise HTTPException(
                 status_code=502,
                 detail=(
-                    "Could not reach the open-source LLM. Is Ollama running "
-                    f"('ollama serve') and is the model pulled ('ollama pull {settings.ollama_model}')?"
+                    "Could not reach the Hugging Face LLM via Inference "
+                    "Providers. Check that HUGGINGFACEHUB_API_TOKEN is valid "
+                    f"and that a provider currently serves '{settings.hf_model_repo_id}' "
+                    "(see the model's page on huggingface.co for supported providers)."
                 ),
             ) from exc
 
