@@ -2,10 +2,15 @@
 Hybrid sentiment service:
   1. cardiffnlp/twitter-roberta-base-sentiment-latest -> fast, reliable
      label + confidence (dedicated classifier, no prompting needed).
-  2. A small chat model -> given the text AND the already-decided label,
-     writes one short sentence explaining why. This is a much easier task
-     than classification (justification, not judgment), so a small model
-     is fast and reliable here even though it wasn't for classification.
+     Called directly via huggingface_hub.InferenceClient because this step
+     needs structured per-class scores (label -> probability), which
+     LangChain's LLM/chat abstractions aren't built to expose — LangChain
+     is a text-generation orchestration layer, not a classification API.
+  2. A small chat model (served on Groq), orchestrated with LangChain ->
+     given the text AND the already-decided label, writes one short
+     sentence explaining why. This IS a text-generation task (a prompt in,
+     a sentence out), so it's a natural fit for LangChain's
+     ChatHuggingFace + prompt template + output parser pipeline.
 
 If step 2 fails or times out, we still return the classification result
 with reason=None rather than failing the whole request — the reason is a
@@ -17,6 +22,9 @@ import time
 from functools import lru_cache
 
 from huggingface_hub import InferenceClient
+from langchain_core.output_parsers import StrOutputParser
+from langchain_core.prompts import ChatPromptTemplate
+from langchain_huggingface import ChatHuggingFace, HuggingFaceEndpoint
 
 from backend.config import Settings, get_settings
 
@@ -35,6 +43,15 @@ _REASON_SYSTEM_PROMPT = (
     "label itself. Respond with only the sentence — no quotes, no prefix."
 )
 
+# Built once at import time — the prompt shape never changes between calls,
+# only the {text} / {label} values do.
+_REASON_PROMPT = ChatPromptTemplate.from_messages(
+    [
+        ("system", _REASON_SYSTEM_PROMPT),
+        ("human", 'Text: "{text}"\nSentiment label: {label}'),
+    ]
+)
+
 
 class LLMSentimentService:
     def __init__(self, settings: Settings):
@@ -46,18 +63,31 @@ class LLMSentimentService:
 
         self.settings = settings
 
+        # -- Classifier: direct Hugging Face Inference Providers call --
+        # Needs the full per-class score dict, which LangChain doesn't model
+        # for classification tasks, so we bypass it here.
         self.classifier = InferenceClient(
             model=settings.hf_model_repo_id,
             token=settings.huggingfacehub_api_token,
             provider=settings.hf_provider,
             timeout=settings.llm_timeout_seconds,
         )
-        self.reasoner = InferenceClient(
-            model=settings.hf_reason_model_repo_id,
-            token=settings.huggingfacehub_api_token,
+
+        # -- Reasoner: LangChain-orchestrated chat pipeline (served via Groq) --
+        # HuggingFaceEndpoint wraps the Hugging Face Inference Providers call
+        # (routed to the "groq" provider per settings.hf_reason_provider);
+        # ChatHuggingFace adapts it to LangChain's chat-model interface so it
+        # can be composed with a prompt template using LCEL (the `|` pipe).
+        reason_endpoint = HuggingFaceEndpoint(
+            repo_id=settings.hf_reason_model_repo_id,
+            huggingfacehub_api_token=settings.huggingfacehub_api_token,
             provider=settings.hf_reason_provider,
+            max_new_tokens=settings.llm_max_new_tokens,
+            temperature=settings.llm_temperature,
             timeout=settings.llm_timeout_seconds,
         )
+        self.reasoner_chat = ChatHuggingFace(llm=reason_endpoint)
+        self.reason_chain = _REASON_PROMPT | self.reasoner_chat | StrOutputParser()
 
     def predict(self, text: str) -> dict:
         start = time.perf_counter()
@@ -71,7 +101,7 @@ class LLMSentimentService:
             for r in results
         }
 
-        # -- Step 2: explain (best-effort, never blocks the response) --
+        # -- Step 2: explain via LangChain (best-effort, never blocks the response) --
         reason = self._generate_reason(text, label)
 
         latency_ms = (time.perf_counter() - start) * 1000
@@ -92,23 +122,12 @@ class LLMSentimentService:
 
     def _generate_reason(self, text: str, label: str) -> str | None:
         logger.debug(
-            "Calling reasoner model=%s provider=%s",
+            "Calling LangChain reasoner model=%s provider=%s",
             self.settings.hf_reason_model_repo_id,
             self.settings.hf_reason_provider,
         )
         try:
-            response = self.reasoner.chat_completion(
-                messages=[
-                    {"role": "system", "content": _REASON_SYSTEM_PROMPT},
-                    {
-                        "role": "user",
-                        "content": f'Text: "{text}"\nSentiment label: {label}',
-                    },
-                ],
-                max_tokens=self.settings.llm_max_new_tokens,
-                temperature=self.settings.llm_temperature,
-            )
-            reason = response.choices[0].message.content.strip()
+            reason = self.reason_chain.invoke({"text": text, "label": label}).strip()
             logger.debug("Reason generated successfully: %r", reason)
             return reason
         except Exception:
