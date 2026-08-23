@@ -19,7 +19,15 @@ class Settings(BaseSettings):
     debug: bool = False
 
     # -- CORS --
-    allowed_origins: list[str] = ["*"]
+    # Restricted to known frontends instead of "*". The deployed Render URL
+    # and localhost (for local dev / docker-compose) are allowed by default.
+    # Override via ALLOWED_ORIGINS in .env if you add another frontend, e.g.:
+    #   ALLOWED_ORIGINS=["https://my-other-frontend.com"]
+    allowed_origins: list[str] = [
+        "https://sentiment-analysis-app-gqpz.onrender.com",
+        "http://localhost:8000",
+        "http://127.0.0.1:8000",
+    ]
 
     # -- Local fine-tuned DistilBERT model --
     distilbert_model_path: str = str(BASE_DIR / "saved_models" / "distilbert_sentiment")
