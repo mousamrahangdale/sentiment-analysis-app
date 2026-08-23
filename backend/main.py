@@ -73,9 +73,6 @@ def create_app() -> FastAPI:
 
         # Live check: confirm the token actually authenticates against
         # Hugging Face, not just that a non-empty string is configured.
-        # NOTE: HealthResponse's field is still named `ollama_reachable`
-        # (kept for schema/frontend backward-compat) but it now reflects HF
-        # token validity, not an Ollama daemon.
         hf_reachable = False
         if settings.huggingfacehub_api_token:
             try:
@@ -91,7 +88,7 @@ def create_app() -> FastAPI:
         return HealthResponse(
             status="ok",
             distilbert_loaded=distilbert_loaded,
-            ollama_reachable=hf_reachable,
+            hf_reachable=hf_reachable,
         )
 
     # Serve the simple frontend at "/" so the whole app is a single `uvicorn` process.
