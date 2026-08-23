@@ -10,12 +10,19 @@ Design notes:
   FastAPI's lifespan and try to warm-load the real model) — a plain
   `TestClient(app)` skips startup/shutdown events, which is what we want
   for route-level unit tests.
-- `get_settings` is wired into the route via FastAPI's `Depends(get_settings)`,
-  so it CANNOT be swapped with `unittest.mock.patch("...get_settings")` —
-  FastAPI resolves the dependency callable it captured at route-definition
-  time, not a fresh module-attribute lookup per request. To override it we
-  use `app.dependency_overrides`, which is the mechanism FastAPI provides
-  for exactly this.
+- Two different settings-injection patterns are used in this file, matching
+  how the app actually wires things up:
+    1. `/api/v1/sentiment/analyze` (sentiment.py) takes settings via
+       `Depends(get_settings)` — FastAPI's dependency injection. To override
+       it in tests we use `app.dependency_overrides[get_settings] = ...`.
+    2. `/api/v1/health` (main.py) does NOT use `Depends()` — it captures a
+       single `settings = get_settings()` object as a closure variable when
+       `create_app()` runs at import time, and reads attributes off that same
+       object on every request. `dependency_overrides` has no effect here
+       (there's no dependency being injected to override), so instead we
+       `patch.object()` the real cached settings singleton directly — since
+       `get_settings()` is `@lru_cache`'d, that's the exact same object the
+       closure is holding.
 """
 
 from unittest.mock import patch
@@ -23,7 +30,7 @@ from unittest.mock import patch
 import pytest
 from fastapi.testclient import TestClient
 
-from backend.config import Settings, get_settings
+from backend.config import get_settings
 from backend.main import app
 from backend.services.distilbert_service import ModelNotFoundError
 
@@ -163,9 +170,8 @@ class TestAnalyzeValidation:
     def test_text_over_max_length_returns_422(self):
         # `get_settings` is injected into the route via `Depends(get_settings)`,
         # so FastAPI resolves it through the DI system rather than a plain
-        # module-attribute lookup. `unittest.mock.patch("...get_settings")`
-        # would silently do nothing here — use `dependency_overrides` instead,
-        # which is what FastAPI actually consults per-request.
+        # module-attribute lookup. `dependency_overrides` is the mechanism
+        # FastAPI actually consults per-request for this route.
         base_settings = get_settings()
         app.dependency_overrides[get_settings] = lambda: base_settings.model_copy(
             update={"max_text_length": 10}
@@ -195,12 +201,16 @@ class TestAnalyzeValidation:
 
 class TestHealth:
     def test_healthy_when_model_loaded_and_hf_reachable(self):
-        base_settings = get_settings()
-        app.dependency_overrides[get_settings] = lambda: base_settings.model_copy(
-            update={"huggingfacehub_api_token": "fake-token-for-test"}
-        )
+        # health() in main.py does NOT use Depends(get_settings) — it reads
+        # a closure variable captured once at app-creation time. That
+        # variable IS the same object get_settings() returns (it's
+        # @lru_cache'd), so patch.object() on the real singleton's attribute
+        # is what actually reaches the route — dependency_overrides would be
+        # a no-op here.
+        real_settings = get_settings()
 
-        with patch("backend.main.get_distilbert_service") as mock_distilbert, \
+        with patch.object(real_settings, "huggingfacehub_api_token", "fake-token-for-test"), \
+             patch("backend.main.get_distilbert_service") as mock_distilbert, \
              patch("httpx.AsyncClient.get") as mock_http_get:
             mock_distilbert.return_value = object()  # loads without raising
             mock_http_get.return_value.status_code = 200
@@ -214,12 +224,10 @@ class TestHealth:
         assert data["hf_reachable"] is True
 
     def test_reports_hf_unreachable_when_no_token_set(self):
-        base_settings = get_settings()
-        app.dependency_overrides[get_settings] = lambda: base_settings.model_copy(
-            update={"huggingfacehub_api_token": ""}
-        )
+        real_settings = get_settings()
 
-        with patch("backend.main.get_distilbert_service") as mock_distilbert:
+        with patch.object(real_settings, "huggingfacehub_api_token", ""), \
+             patch("backend.main.get_distilbert_service") as mock_distilbert:
             mock_distilbert.return_value = object()
 
             resp = client.get(HEALTH_URL)
