@@ -1,9 +1,14 @@
 # Signal Lab — Sentiment Console
 
+[![Run Tests](https://github.com/mousamrahangdale/sentiment-analysis-app/actions/workflows/test.yml/badge.svg)](https://github.com/mousamrahangdale/sentiment-analysis-app/actions/workflows/test.yml)
+
 A production-shaped sentiment analysis app that lets you compare **your own
 fine-tuned DistilBERT model** against a **hybrid open-source pipeline**
 (dedicated sentiment classifier + small LLM for reasoning) on the same text,
 side by side.
+
+**Live demo:** https://sentiment-analysis-app-gqpz.onrender.com
+*(free-tier instance — first request after inactivity can take ~50s to wake up)*
 
 ```
 ┌─────────────┐     POST /api/v1/sentiment/analyze     ┌──────────────────────────┐
@@ -36,6 +41,7 @@ sentiment-analysis-project/
 ├── frontend/                # plain HTML/CSS/JS console UI
 ├── saved_models/distilbert_sentiment/   # <- your checkpoint files live here
 ├── tests/test_api.py
+├── .github/workflows/test.yml   # CI: runs the test suite on every push/PR
 ├── requirements.txt
 ├── Dockerfile
 ├── docker-compose.yml
@@ -180,7 +186,19 @@ curl -X POST http://localhost:8000/api/v1/sentiment/analyze \
 pytest
 ```
 
-## 9. Run with Docker
+All backend routes are covered with mocked services (no real model load or
+network call required), so the suite runs in a couple of seconds.
+
+## 9. Continuous Integration
+
+Every push and pull request to `main` triggers a GitHub Actions workflow
+(`.github/workflows/test.yml`) that installs dependencies and runs the full
+`pytest` suite in a clean Ubuntu container — see the badge at the top of
+this README for the current status, or check the
+[Actions tab](https://github.com/mousamrahangdale/sentiment-analysis-app/actions)
+for run history and logs.
+
+## 10. Run with Docker
 
 ```bash
 docker compose up --build
@@ -189,12 +207,15 @@ docker compose up --build
 Open **http://localhost:8000**. The `.env` file is injected at runtime
 (`env_file:` in `docker-compose.yml`) — it is never baked into the image.
 
-## 10. Deploy
+## 11. Deploy
 
 The app ships as a single Docker image (see `Dockerfile`), so it deploys
 cleanly to any container platform (Render, Railway, Fly.io, Hugging Face
 Spaces). Set the same environment variables from `.env` in your platform's
 dashboard — do not commit `.env` to git.
+
+This project is currently deployed on **Render** (see the live demo link
+above), with auto-deploy enabled on every push to `main`.
 
 ## Design notes
 
