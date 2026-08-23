@@ -11,13 +11,14 @@ class SentimentRequest(BaseModel):
     source: SentimentSource = Field(
         ...,
         description="'local_model' -> your fine-tuned DistilBERT checkpoint, "
-        "'llm' -> open-source LLM via LangChain",
+        "'llm' -> Hugging Face classifier for label/confidence, with the "
+        "explanation generated via a LangChain-orchestrated chat pipeline (Groq)",
     )
 
 
 class SentimentResponse(BaseModel):
     source: SentimentSource
-    engine: str                       # e.g. "distilbert-finetuned" or "huggingface_open-source-model"
+    engine: str                       # e.g. "distilbert-finetuned" or "huggingface:cardiffnlp/twitter-roberta-base-sentiment-latest"
     label: SentimentLabel
     confidence: float                 # 0..1
     probabilities: Optional[dict[str, float]] = None   # only for local_model
