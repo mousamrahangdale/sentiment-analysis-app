@@ -87,11 +87,15 @@ class LLMSentimentService:
             "text_length": len(text),
         }
 
-        print(f"[DEBUG] Final result dict being returned: {result}")
+        logger.debug("Final result dict being returned: %s", result)
         return result
 
     def _generate_reason(self, text: str, label: str) -> str | None:
-        print(f"[DEBUG] Calling reasoner model={self.settings.hf_reason_model_repo_id} provider={self.settings.hf_reason_provider}")
+        logger.debug(
+            "Calling reasoner model=%s provider=%s",
+            self.settings.hf_reason_model_repo_id,
+            self.settings.hf_reason_provider,
+        )
         try:
             response = self.reasoner.chat_completion(
                 messages=[
@@ -105,10 +109,9 @@ class LLMSentimentService:
                 temperature=self.settings.llm_temperature,
             )
             reason = response.choices[0].message.content.strip()
-            print(f"[DEBUG] Reason generated successfully: {reason!r}")
+            logger.debug("Reason generated successfully: %r", reason)
             return reason
-        except Exception as e:
-            print(f"[DEBUG] Reason generation FAILED: {type(e).__name__}: {e}")
+        except Exception:
             logger.warning("Reason generation failed; returning label without reason.", exc_info=True)
             return None
 
