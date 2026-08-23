@@ -211,7 +211,7 @@ class TestHealth:
         data = resp.json()
         assert data["status"] == "ok"
         assert data["distilbert_loaded"] is True
-        assert data["ollama_reachable"] is True
+        assert data["hf_reachable"] is True
 
     def test_reports_hf_unreachable_when_no_token_set(self):
         base_settings = get_settings()
@@ -225,7 +225,7 @@ class TestHealth:
             resp = client.get(HEALTH_URL)
 
         assert resp.status_code == 200
-        assert resp.json()["ollama_reachable"] is False
+        assert resp.json()["hf_reachable"] is False
 
     def test_reports_distilbert_not_loaded(self):
         with patch("backend.main.get_distilbert_service") as mock_distilbert:
