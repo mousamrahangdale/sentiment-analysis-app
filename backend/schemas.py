@@ -17,7 +17,7 @@ class SentimentRequest(BaseModel):
 
 class SentimentResponse(BaseModel):
     source: SentimentSource
-    engine: str                       # e.g. "distilbert-finetuned" or "ollama:llama3.2"
+    engine: str                       # e.g. "distilbert-finetuned" or "huggingface_open-source-model"
     label: SentimentLabel
     confidence: float                 # 0..1
     probabilities: Optional[dict[str, float]] = None   # only for local_model
@@ -29,4 +29,4 @@ class SentimentResponse(BaseModel):
 class HealthResponse(BaseModel):
     status: str
     distilbert_loaded: bool
-    ollama_reachable: bool
+    hf_reachable: bool
