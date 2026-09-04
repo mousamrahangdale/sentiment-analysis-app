@@ -1,4 +1,4 @@
-# Signal Lab — Sentiment Console
+# Sentiment Analysis APP
 
 [![Run Tests](https://github.com/mousamrahangdale/sentiment-analysis-app/actions/workflows/test.yml/badge.svg)](https://github.com/mousamrahangdale/sentiment-analysis-app/actions/workflows/test.yml)
 
